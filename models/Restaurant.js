@@ -16,18 +16,22 @@ const RestaurantsSchema = new mongoose.Schema(
         "Phone number must be between 10 and 15 digits",
       ],
     },
-    address: { type: String, required: true },
+    address: { type: String, required: true }, 
     logo: {
       type: String,
       default: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
     },
-    license: { type: String, required: true }, 
-    status: {
+    license: { type: String, required: true },
+    verificationStatus: {
       type: String,
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
-
+    operationalStatus: {
+      type: String,
+      enum: ["active", "warned", "blocked"],
+      default: "active",
+    },
     cuisine: [String],
     description: { type: String, maxlength: 500 },
     openingHours: String,

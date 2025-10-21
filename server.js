@@ -1,27 +1,39 @@
 import express from "express";
-import dotenv from 'dotenv'
+import dotenv from "dotenv";
 import { connectToMongo } from "./config/db.js";
 import userRouter from "./routes/userRoutes.js";
 import restaurantRouter from "./routes/restaurantRoutes.js";
-import adminRouter from "./routes/adminRoutes.js"
-import orderRouter from "./routes/orderRoutes.js"
+import adminRouter from "./routes/adminRoutes.js";
+import orderRouter from "./routes/orderRoutes.js";
+import stripeRouter from "./routes/stripeRoute.js";
+import bodyParser from "body-parser";
+import { stripePaymentWebhook } from "./controllers/stripeController.js";
 
-dotenv.config({ override: true,debug:true });
+dotenv.config();
+connectToMongo();
 
-connectToMongo()
-const app = express()
-app.use(express.json())
+const app = express();
 
-app.get('/',(req,res)=>{
-    res.send("FoodGo is running...")
-})
+// ⚠️ STRIPE WEBHOOK: must come BEFORE express.json()
+app.post(
+   "/api/stripe-payments/webhook",
+  bodyParser.raw({ type: "application/json" }),
+  stripePaymentWebhook
+);
 
-app.use('/api/user',userRouter)
-app.use('/api/restaurant',restaurantRouter)
-app.use('/api/admin',adminRouter)
-app.use('/api/order',orderRouter)
+// Then normal JSON parser for all other routes
+app.use(express.json());
 
-const port = process.env.PORT || 3000
-app.listen(port,()=>{
-    console.log(`Server started on port ${port}`)
-})
+app.get("/", (req, res) => {
+  res.send("FoodGo is running...");
+});
+
+app.use("/api/user", userRouter);
+app.use("/api/restaurant", restaurantRouter);
+app.use("/api/admin", adminRouter);
+app.use("/api/order", orderRouter);
+
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log(`✅ Server started on port ${port}`);
+});

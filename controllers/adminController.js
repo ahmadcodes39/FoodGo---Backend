@@ -24,7 +24,7 @@ export const approveRestaurant = async (req, res) => {
       });
     }
 
-    restaurant.status = status;
+    restaurant.verificationStatus = status;
     await restaurant.save();
 
     return res.status(200).json({

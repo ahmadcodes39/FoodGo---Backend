@@ -2,6 +2,9 @@ import MenuItems from "../models/MenuItems.js";
 import Restaurant from "../models/Restaurant.js";
 import { storeImageToCloud } from "../helperFunctions/imageToCloud.js";
 
+import User from "../models/User.js";
+
+
 export const registerRestaurant = async (req, res) => {
   try {
     const {
@@ -13,7 +16,6 @@ export const registerRestaurant = async (req, res) => {
       openingHours,
       deliveryAvailable,
       deliveryTime,
-      deliveryFee,
     } = req.body;
 
     const ownerId = req.user.id;
@@ -47,10 +49,12 @@ export const registerRestaurant = async (req, res) => {
       openingHours,
       deliveryAvailable,
       deliveryTime,
-      deliveryFee,
       logo: logoUrl || undefined,
       license: licenseUrl || undefined,
     });
+
+    // Update user's isOnBoarded status to true
+    await User.findByIdAndUpdate(ownerId, { isOnBoarded: true });
 
     return res.status(201).json({
       message: "Restaurant registered successfully",
@@ -87,7 +91,7 @@ export const addMenuItems = async (req, res) => {
       "restaurant/menu-items"
     );
     const restaurant = await Restaurant.findById(restaurantId);
-    if (restaurant.status == "approved") {
+    if (restaurant.verificationStatus == "approved") {
       const menuItem = await MenuItems.create({
         restaurantId,
         name,
@@ -107,9 +111,8 @@ export const addMenuItems = async (req, res) => {
         message: "Menu item added successfully",
         menuItem,
       });
-    }
-    else{
-      return res.status(400).json({message:"Restaurant is not approved!"})
+    } else {
+      return res.status(400).json({ message: "Restaurant is not approved!" });
     }
   } catch (error) {
     console.error("Menu Items Error:", error);
@@ -131,7 +134,6 @@ export const updateDetails = async (req, res) => {
       openingHours,
       deliveryAvailable,
       deliveryTime,
-      deliveryFee,
     } = req.body;
 
     if (!restaurantId) {
@@ -162,7 +164,6 @@ export const updateDetails = async (req, res) => {
     if (deliveryAvailable !== undefined)
       restaurant.deliveryAvailable = deliveryAvailable;
     if (deliveryTime) restaurant.deliveryTime = deliveryTime;
-    if (deliveryFee) restaurant.deliveryFee = deliveryFee;
 
     if (req.files?.logo) {
       restaurant.logo = await storeImageToCloud(
@@ -226,7 +227,7 @@ export const updateMenuItem = async (req, res) => {
       menuItem.price = priceNumber;
     }
     if (category) menuItem.category = category;
-    menuItem.image = storeImageToCloud(
+    menuItem.image = await storeImageToCloud(
       req.files.image[0],
       "restaurant/menu-items"
     );
@@ -285,22 +286,52 @@ export const deleteMenuItem = async (req, res) => {
 
 export const fetchApprovedRestaurants = async (req, res) => {
   try {
-    const restaurants = await Restaurant.find({ status: "approved" }).populate(
-      "menu"
-    );
+    const restaurants = await Restaurant.find({ verificationStatus: "approved" });
 
     if (!restaurants || restaurants.length === 0) {
       return res.status(404).json({
         message: "No approved restaurants found",
       });
     }
-
     return res.status(200).json({
       message: "Approved restaurants fetched successfully",
       restaurants,
     });
   } catch (error) {
     console.error("Fetch Approved Restaurants Error:", error);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+export const getMenuItems = async (req, res) => {
+  try {
+    const { restaurantId } = req.params;
+
+    if (!restaurantId) {
+      return res.status(400).json({ message: "Restaurant ID is required" });
+    }
+
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurant) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    const menuItems = await MenuItems.find({ restaurantId });
+
+    if (!menuItems || menuItems.length === 0) {
+      return res.status(404).json({ message: "No menu items found" });
+    }
+
+    return res.status(200).json({
+      message: "Data fetched successfully",
+      restaurant,
+      menuItems,
+    });
+  } catch (error) {
+    console.error("Get Menu Items Error:", error);
     return res.status(500).json({
       message: "Internal Server Error",
       error: error.message,

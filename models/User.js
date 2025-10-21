@@ -21,7 +21,7 @@ const UserSchema = new mongoose.Schema(
     },
     profilePic: {
       type: String,
-      default: "https://cdn-icons-png.flaticon.com/512/149/149071.png", 
+      default: "https://cdn-icons-png.flaticon.com/512/149/149071.png",
     },
     phone: {
       type: String,
@@ -31,11 +31,20 @@ const UserSchema = new mongoose.Schema(
         "Phone number must be between 10 and 15 digits",
       ],
     },
+    status: { 
+      type: String,
+      default: "active",
+      enum: ["active", "warned", "blocked"],
+    },
     role: {
       type: String,
-      enum: ["customer", "restaurantOwner", "admin"],
+      enum: ["customer", "restaurant owner", "admin","complaint manager"],
       required: true,
     },
+    isOnBoarded:{
+      type:Boolean,
+      default:false,
+    }
   },
   { timestamps: true }
 );

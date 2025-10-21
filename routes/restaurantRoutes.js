@@ -7,6 +7,7 @@ import {
   fetchApprovedRestaurants,
   registerRestaurant,
   updateDetails,
+  getMenuItems,
   updateMenuItem,
 } from "../controllers/restaurantController.js";
 const router = Router();
@@ -29,12 +30,19 @@ router.post(
   upload.fields([{ name: "image" }]),
   addMenuItems
 );
+router.get(
+  "/:restaurantId/get-menu",
+  auth,
+  getMenuItems
+);
 router.put(
   "/:restaurantId/:menuItemId/add-menu",
   auth,
   upload.fields([{ name: "image" }]),
   updateMenuItem
 );
+
+
 router.delete("/:restaurantId/:menuItemId/delete-menu", auth, deleteMenuItem);
 
 router.get("/fetch-restaurants", auth, fetchApprovedRestaurants);

@@ -16,19 +16,17 @@ const orderSchema = new mongoose.Schema(
     deliveryAddress: { type: String, required: true },
     status: {
       type: String,
-      enum: [
-        "pending",
-        "confirmed",
-        "preparing",
-        "out-for-delivery",
-        "delivered",
-      ],
+      enum: ["pending", "confirmed", "preparing", "arriving", "delivered"],
       default: "pending",
     },
     paymentStatus: {
       type: String,
       enum: ["pending", "paid", "failed"],
       default: "pending",
+    },
+    paymentMethod: {
+      type: String,
+      enum: ["card", "wallet", "bank_transfer"],
     },
     totalPrice: {
       type: Number,
