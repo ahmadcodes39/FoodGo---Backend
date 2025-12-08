@@ -11,47 +11,46 @@ export const stripePaymentWebhook = async (req, res) => {
   let event;
 
   try {
-    // verify the event came from Stripe
     event = stripe.webhooks.constructEvent(
-      req.body, // raw body (not parsed)
+      req.body,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET // from your Stripe dashboard
+      process.env.STRIPE_WEBHOOK_SECRET
     );
   } catch (err) {
-    console.error("⚠️ Webhook signature verification failed:", err.message);
+    console.error("Webhook signature verification failed:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Handle specific event types
-  switch (event.type) {
-    case "checkout.session.completed": {
-      const session = event.data.object;
-      const orderId = session.metadata?.orderId;
+ if (event.type === "checkout.session.completed") {
+  const sessionObj = event.data.object;
+  const meta = sessionObj.metadata || {};
 
-      if (orderId) {
-        await Order.findByIdAndUpdate(orderId, {
+  let orderIds = [];
+
+  if (meta.orderIds) {
+    orderIds = meta.orderIds.split(",").map((id) => id.trim());
+  }
+
+  if (orderIds.length > 0) {
+    await Order.updateMany(
+      { _id: { $in: orderIds } },
+      {
+        $set: {
           paymentStatus: "paid",
           status: "confirmed",
-          paymentId: session.id,
-        });
+        },
+        $push: {
+          statusHistory: {
+            status: "confirmed",
+            time: new Date(),
+          },
+        },
       }
-
-      console.log(`✅ Checkout session completed for Order ID: ${orderId}`);
-      break;
-    }
-
-    case "checkout.session.expired": {
-      const session = event.data.object;
-      const orderId = session.metadata?.orderId;
-      if (orderId) {
-        await Order.findByIdAndUpdate(orderId, { paymentStatus: "failed" });
-      }
-      break;
-    }
-
-    default:
-      console.log(`Unhandled event type: ${event.type}`);
+    );
   }
+}
+
 
   res.status(200).json({ received: true });
 };
+

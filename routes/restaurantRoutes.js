@@ -4,47 +4,63 @@ import upload from "../config/multer.js";
 import {
   addMenuItems,
   deleteMenuItem,
-  fetchApprovedRestaurants,
   registerRestaurant,
-  updateDetails,
+  updateRestaurantDetails,
   getMenuItems,
   updateMenuItem,
+  getRestaurantDashboardStats,
+  getRestaurantAllOrders,
+  getRestaurantRevenue,
+  getRestaurantAnalytics,
+  makeAComplaint,
+  updateOrderStatus,
+  myComplaints,
+  getMenuCategories,
 } from "../controllers/restaurantController.js";
 const router = Router();
 
+// register restaurant
 router.post(
   "/register",
   auth,
   upload.fields([{ name: "logo" }, { name: "license" }]),
   registerRestaurant
 );
+// update restaurant details
 router.put(
-  "/:restaurantId/updateDetails",
+  "/:restaurantId/update-restaurant-details",
   auth,
   upload.fields([{ name: "logo" }, { name: "license" }]),
-  updateDetails
+  updateRestaurantDetails
 );
+// add menu items
 router.post(
   "/:restaurantId/add-menu",
   auth,
   upload.fields([{ name: "image" }]),
   addMenuItems
 );
-router.get(
-  "/:restaurantId/get-menu",
-  auth,
-  getMenuItems
-);
+// get menu items
+router.get("/:restaurantId/get-menu", auth, getMenuItems);
+// update menu items
 router.put(
   "/:restaurantId/:menuItemId/add-menu",
   auth,
   upload.fields([{ name: "image" }]),
   updateMenuItem
 );
-
-
+// delete menu items
 router.delete("/:restaurantId/:menuItemId/delete-menu", auth, deleteMenuItem);
+// get dashboard stats
+router.get("/:id/dashboard-stats", auth, getRestaurantDashboardStats);
 
-router.get("/fetch-restaurants", auth, fetchApprovedRestaurants);
+// get all orders
+router.get("/:restaurantId/orders",auth, getRestaurantAllOrders);
 
+router.get("/:id/revenue", auth, getRestaurantRevenue);
+router.get("/:id/analytics",auth, getRestaurantAnalytics);
+router.post("/make-complaint",auth, makeAComplaint);
+router.patch("/update-order-status",auth,updateOrderStatus)
+router.get("/my-complaints",auth,myComplaints)
+router.get("/:id/menu-categories",getMenuCategories)
 export default router;

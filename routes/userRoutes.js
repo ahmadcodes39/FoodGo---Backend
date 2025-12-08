@@ -14,6 +14,7 @@ router.put(
   upload.fields([{ name: "profilePic" }]),
   updateProfile
 );
+
 router.get("/me", auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");

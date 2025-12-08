@@ -2,6 +2,8 @@ import { Router } from "express";
 import User from "../models/User.js";
 import { createToken } from "../helperFunctions/createToken.js";
 import bcrypt from "bcryptjs";
+import { storeImageToCloud } from "../helperFunctions/imageToCloud.js";
+
 
 export const SignUp = async (req, res) => {
   try {
@@ -28,7 +30,8 @@ export const SignUp = async (req, res) => {
       role,
     });
 
-    user.isOnBoarded = role.toLowerCase() === "customer";
+  user.isOnBoarded = ["customer", "admin", "complaint manager"].includes(role.toLowerCase());
+
 
     await user.save();
 
@@ -78,7 +81,6 @@ export const login = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };
-import { storeImageToCloud } from "../helperFunctions/imageToCloud.js";
 
 export const updateProfile = async (req, res) => {
   try {
@@ -115,5 +117,30 @@ export const updateProfile = async (req, res) => {
   } catch (error) {
     console.error("Update profile Error:", error);
     return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export const fetchApprovedRestaurants = async (req, res) => {
+  try {
+    const restaurants = await Restaurant.find({
+      verificationStatus: "approved",
+    });
+
+    if (!restaurants || restaurants.length === 0) {
+      return res.status(404).json({
+        message: "No approved restaurants found",
+      });
+    }
+    return res.status(200).json({
+      success: true,
+      restaurants,
+    });
+  } catch (error) {
+    console.error("Fetch Approved Restaurants Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
   }
 };

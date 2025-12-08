@@ -14,16 +14,16 @@ const orderItemSchema = new mongoose.Schema(
     },
     quantity: {
       type: Number,
-      required: true, 
+      required: true,
       min: 1,
     },
     price: {
       type: Number,
       required: true,
-    }
+    },
   },
   { timestamps: true }
 );
 
-const OrderItem =  mongoose.model("OrderItem", orderItemSchema);
-export default OrderItem
+const OrderItem = mongoose.model("OrderItem", orderItemSchema);
+export default OrderItem;

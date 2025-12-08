@@ -19,6 +19,13 @@ const orderSchema = new mongoose.Schema(
       enum: ["pending", "confirmed", "preparing", "arriving", "delivered"],
       default: "pending",
     },
+    // for keep tracking of order this field is used
+    statusHistory: [
+      {
+        status: String,
+        time: { type: Date, default: Date.now },
+      },
+    ],
     paymentStatus: {
       type: String,
       enum: ["pending", "paid", "failed"],

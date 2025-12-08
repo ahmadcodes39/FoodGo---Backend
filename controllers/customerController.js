@@ -3,122 +3,433 @@ import MenuItem from "../models/MenuItems.js";
 import OrderItem from "../models/OrderItem.js";
 import { stripe } from "../config/stripe.js";
 import { formatDistanceToNow } from "date-fns";
-import mongoose from "mongoose";
+import mongoose, { set, trusted } from "mongoose";
 import dotenv from "dotenv";
+import Restaurant from "../models/Restaurant.js";
+import moment from "moment";
+import Complaint from "../models/Complaints.js";
 
 dotenv.config();
 
 export const placeOrder = async (req, res) => {
-  // Start a new session for the transaction
   const session = await mongoose.startSession();
 
   try {
-    // Start the transaction
     session.startTransaction();
 
     const { items, deliveryAddress } = req.body;
     const customerId = req.user.id;
 
     if (!items || items.length === 0 || !deliveryAddress) {
-      return res
-        .status(400)
-        .json({ message: "Items and delivery address are required" });
+      return res.status(400).json({
+        success: false,
+        message: "Items and delivery address are required",
+      });
     }
 
-    // --- 1. Performance Optimization: Bulk Fetch Menu Items ---
-    const menuItemIds = items.map((item) => item.menuItem);
+    // Extract menuItem IDs
+    const menuItemIds = items.map((i) => i.menuItem);
     const menuItems = await MenuItem.find({
       _id: { $in: menuItemIds },
     }).session(session);
 
-    // Create a map for efficient lookups (O(1) access)
-    const menuItemMap = new Map(
-      menuItems.map((item) => [item._id.toString(), item])
-    );
+    const menuMap = new Map(menuItems.map((m) => [m._id.toString(), m]));
 
-    let totalPrice = 0;
-    const orderItemsToCreate = [];
+    // -------------------------------
+    // 1️⃣ Group items by restaurantId
+    // -------------------------------
+    const grouped = {}; // { restaurantId: [items] }
 
-    // This loop now performs no database calls
     for (const item of items) {
-      const menuItem = menuItemMap.get(item.menuItem);
-      if (!menuItem) {
-        // If any item is not found, the entire transaction should fail
-        throw new Error(`Menu item with ID ${item.menuItem} not found`);
+      if (!grouped[item.restaurantId]) {
+        grouped[item.restaurantId] = [];
       }
-
-      const price = menuItem.price * item.quantity;
-      totalPrice += price;
-
-      orderItemsToCreate.push({
-        restaurantId: item.restaurantId,
-        item: menuItem._id,
-        quantity: item.quantity,
-        price: price,
-      });
+      grouped[item.restaurantId].push(item);
     }
 
-    // --- 2. Performance Optimization: Bulk Create Order Items ---
-    const createdOrderItems = await OrderItem.insertMany(orderItemsToCreate, {
-      session,
-    });
-    const orderItemIds = createdOrderItems.map((item) => item._id);
+    // -------------------------------
+    // 2️⃣ Create separate orders
+    // -------------------------------
+    const createdOrders = [];
+    const allOrderItemIds = []; // for Stripe
 
-    // --- 3. Create the Final Order ---
-    // Using new Order() and order.save() to create the document within the session
-    const order = new Order({
-      customerId,
-      orderItems: orderItemIds,
-      deliveryAddress,
-      totalPrice,
-      paymentStatus: "pending",
-      status: "pending",
-      paymentMethod: "card",
-    });
-    await order.save({ session });
+    for (const restaurantId of Object.keys(grouped)) {
+      const restaurantItems = grouped[restaurantId];
 
-    // --- 4. Create Stripe Checkout Session ---
-    const sessionStripe = await stripe.checkout.sessions.create({
+      let totalPrice = 0;
+      const orderItemsToCreate = [];
+
+      // Build Order Items
+      for (const cartItem of restaurantItems) {
+        const menu = menuMap.get(cartItem.menuItem);
+        if (!menu) throw new Error("Menu item not found!");
+
+        const price = menu.price * cartItem.quantity;
+        totalPrice += price;
+
+        orderItemsToCreate.push({
+          restaurantId,
+          item: menu._id,
+          quantity: cartItem.quantity,
+          price: price,
+        });
+      }
+
+      // Create OrderItems in DB
+      const createdOrderItems = await OrderItem.insertMany(orderItemsToCreate, {
+        session,
+      });
+
+      const orderItemIds = createdOrderItems.map((i) => i._id);
+      allOrderItemIds.push(...createdOrderItems);
+
+      // Create ONE order per restaurant
+      const order = await Order.create(
+        [
+          {
+            customerId,
+            orderItems: orderItemIds,
+            deliveryAddress,
+            totalPrice,
+            paymentStatus: "pending",
+            status: "pending",
+            paymentMethod: "card",
+            restaurantId, // Optional: store main restaurant for easier queries
+          },
+        ],
+        { session }
+      );
+
+      createdOrders.push(order[0]);
+    }
+
+    // 🧡 Create one Stripe session for whole cart (multiple restaurants)
+    const stripeSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
-      line_items: items.map((item) => {
-        const menuItem = menuItemMap.get(item.menuItem);
+
+      line_items: items.map((cartItem) => {
+        const menu = menuMap.get(cartItem.menuItem);
         return {
           price_data: {
             currency: "usd",
             product_data: {
-              name: menuItem.name,
+              name: menu.name,
             },
-            unit_amount: Math.round(menuItem.price * 100),
+            unit_amount: Math.round(menu.price * 100),
           },
-          quantity: item.quantity,
+          quantity: cartItem.quantity,
         };
       }),
+
       mode: "payment",
+
       metadata: {
-        orderId: order._id.toString(),
+        orderIds: createdOrders.map((o) => o._id.toString()).join(","), // important
       },
-      success_url: `${process.env.CLIENT_URL}/payment-success?orderId=${order._id}`,
-      cancel_url: `${process.env.CLIENT_URL}/payment-cancel?orderId=${order._id}`,
+
+      success_url: `${process.env.CLIENT_URL}/payment-success`,
+      cancel_url: `${process.env.CLIENT_URL}/payment-cancel`,
     });
 
-    // If everything is successful, commit the transaction
     await session.commitTransaction();
 
     return res.status(201).json({
-      message: "Order created successfully. Proceed to payment.",
-      url: sessionStripe.url, // ✅ redirect to this in frontend
-      orderId: order._id,
+      success: true,
+      message: "Orders created successfully. Proceed to payment.",
+      stripeUrl: stripeSession.url,
+      orderIds: createdOrders.map((o) => o._id),
     });
   } catch (error) {
-    // If any error occurs, abort the transaction
     await session.abortTransaction();
-    console.error("Place Order Transaction Error:", error);
-    res
-      .status(500)
-      .json({ message: "Internal Server Error", error: error.message });
+    console.error("PlaceOrder Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   } finally {
-    // Always end the session
     session.endSession();
+  }
+};
+
+export const getRestaurantCuisine = async (req, res) => {
+  try {
+    const restaurants = await Restaurant.find();
+    let cuisine = new Set();
+
+    restaurants.forEach((rest) => {
+      rest.cuisine.forEach((c) => cuisine.add(c));
+    });
+
+    if (cuisine.size > 0) {
+      return res.status(200).json({
+        success: true,
+        cuisine: Array.from(cuisine),
+      });
+    } else {
+      return res.status(200).json({
+        success: true,
+        cuisine: [],
+      });
+    }
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "server error",
+      error: error?.message,
+    });
+  }
+};
+
+export const getRestaurantFrontInfo = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 6;
+    const skip = (page - 1) * limit;
+
+    // Fetch restaurants with selected fields
+    const restaurants = await Restaurant.find({
+      verificationStatus: "approved",
+      operationalStatus: "active",
+    })
+      .select("logo deliveryAvailable name cuisine deliveryTime") // same fields as your old function
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+
+    const total = await Restaurant.countDocuments({
+      verificationStatus: "approved",
+      operationalStatus: "active",
+    });
+
+    return res.status(200).json({
+      success: true,
+      restaurants,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error in fetching restaurant info",
+      error: error?.message,
+    });
+  }
+};
+
+export const getRestaurantDetailInfo = async (req, res) => {
+  try {
+    const { restaurantId } = req.params.id;
+
+    if (!restaurantId) {
+      return res.status(400).json({
+        success: false,
+        message: "Restaurant Id is required",
+      });
+    }
+
+    // get restaurant with selected fields + populate menu
+    const restaurantInfo = await Restaurant.findById(restaurantId)
+      .select(
+        "logo name cuisine description address restaurantPhoneNumber openingHours deliveryTime deliveryAvailable menu"
+      )
+      .populate("menu");
+
+    if (!restaurantInfo) {
+      return res.status(404).json({
+        success: false,
+        message: "Restaurant not found",
+      });
+    }
+
+    // collect unique categories
+    let categories = new Set();
+    restaurantInfo.menu.forEach((item) => {
+      categories.add(item.category);
+    });
+
+    return res.status(200).json({
+      success: true,
+      info: restaurantInfo,
+      categories: Array.from(categories),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error in getting restaurant info",
+      error: error?.message,
+    });
+  }
+};
+
+export const getMyOrders = async (req, res) => {
+  try {
+    const customerId = req.user.id;
+
+    const orders = await Order.find({ customerId })
+      .select(
+        "_id customerId status totalPrice createdAt updatedAt __v orderItems statusHistory"
+      )
+      .sort({ createdAt: -1 })
+      .populate({
+        path: "orderItems",
+        select: "restaurantId -_id",
+        populate: {
+          path: "restaurantId",
+          select: "name logo -_id",
+        },
+      });
+
+    // Add deliveredAt field for orders with status 'delivered'
+    const ordersWithDeliveredAt = orders.map((order) => {
+      let deliveredAt = null;
+      if (order.status === "delivered" && order.statusHistory.length > 0) {
+        // find the time when status was set to 'delivered'
+        const deliveredStatus = order.statusHistory.find(
+          (s) => s.status === "delivered"
+        );
+        if (deliveredStatus) {
+          deliveredAt = deliveredStatus.time;
+        }
+      }
+
+      // return order as plain object with deliveredAt
+      return {
+        ...order.toObject(),
+        deliveredAt,
+      };
+    });
+
+    return res.status(200).json({ orders: ordersWithDeliveredAt });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error getting order detail",
+      error: error.message,
+    });
+  }
+};
+
+export const getDetailOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    // REMOVE select or include orderItems
+    const order = await Order.findById(orderId).select(
+      "statusHistory deliveryAddress totalPrice orderItems"
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    await order.populate([
+      {
+        path: "orderItems",
+        populate: [
+          { path: "item", select: "name price" },
+          { path: "restaurantId", select: "name logo" },
+        ],
+      },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      order,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error getting order detail",
+      error: error.message,
+    });
+  }
+};
+
+export const makeAComplaint = async (req, res) => {
+  try {
+    const { reason, orderId, againstUser, againstRestaurant } = req.body;
+    if (!reason || !orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "Reason and orderId are required",
+      });
+    }
+    const customerId = req.user.id;
+
+    const complaint = await Complaint.create({
+      raisedBy: customerId,
+      orderId,
+      reason,
+      complaintStatus: "Customer",
+      againstUser: againstUser || null,
+      againstRestaurant: againstRestaurant || null,
+    });
+    return res.status(201).json({
+      success: true,
+      complaint,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error in making complaints",
+      error: error.message,
+    });
+  }
+};
+
+export const getMyComplaints = async (req, res) => {
+  try {
+    const customerId = req.user.id;
+
+    const myComplaints = await Complaint.find({
+      raisedBy: customerId,
+    })
+      .select("-againstUser -responseToCustomer -responseToRestaurant")
+      .populate("againstRestaurant", "name logo")
+      .populate("orderId", "_id");
+
+    return res.status(200).json({
+      success: true,
+      complaints: myComplaints,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch complaints",
+      error: error.message,
+    });
+  }
+};
+export const getDetailComplaints = async (req, res) => {
+  try {
+    const customerId = req.user.id;
+    const { complaintId } = req.params;
+
+    const myComplaints = await Complaint.find({
+      raisedBy: customerId,
+      _id: complaintId,
+    })
+      .select("-againstUser -responseToCustomer -responseToRestaurant")
+      .populate("againstRestaurant", "name logo")
+      .populate(
+        "orderId",
+        "_id deliveryAddress paymentMethod paymentStatus totalPrice statusHistory"
+      );
+
+    return res.status(200).json({
+      success: true,
+      complaints: myComplaints,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch complaints",
+      error: error.message,
+    });
   }
 };
 
@@ -194,17 +505,20 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    const updatedOrder = await Order.findByIdAndUpdate(
-      orderId,
-      { status },
-      { new: true }
-    )
+    // Find the order first
+    const order = await Order.findById(orderId)
       .populate("orderItems")
       .populate("customerId", "name phone");
 
-    if (!updatedOrder) {
+    if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
+
+    // ✅ Push new status into history before saving
+    order.status = status;
+    order.statusHistory.push({ status, time: new Date() });
+
+    const updatedOrder = await order.save();
 
     return res.status(200).json({
       message: "Order status updated successfully",
@@ -222,7 +536,13 @@ export const updateOrderStatus = async (req, res) => {
 export const getTodayOrderStats = async (req, res) => {
   try {
     const { restaurantId } = req.params;
-    const statuses = ["pending", "confirmed", "preparing", "arriving", "delivered"];
+    const statuses = [
+      "pending",
+      "confirmed",
+      "preparing",
+      "arriving",
+      "delivered",
+    ];
     const orderStats = {};
 
     // Date range
@@ -385,8 +705,18 @@ export const getRestaurantRevenueData = async (req, res) => {
 
     // 3️⃣ YEARLY DATA
     const months = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
     const yearlyData = months.map((m) => ({ name: m, revenue: 0 }));
 
@@ -498,4 +828,3 @@ export const getAnalyticsStats = async (req, res) => {
     });
   }
 };
-
