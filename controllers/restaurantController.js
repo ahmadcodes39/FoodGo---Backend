@@ -395,7 +395,7 @@ export const deleteMenuItem = async (req, res) => {
     }
     const isOwner = restaurant.ownerId.toString() === req.user.id;
     const isAdmin = req.user.role === "admin";
-    const isVerificationManager = req.user.role === "verificationManager";
+    const isVerificationManager = req.user.role === "complaintManager";
 
     if (!isOwner && !isAdmin && !isVerificationManager) {
       return res.status(403).json({

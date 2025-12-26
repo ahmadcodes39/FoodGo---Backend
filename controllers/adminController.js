@@ -439,7 +439,7 @@ export const getAdminAnalytics = async (req, res) => {
     const range = req.query.range || "monthly";
 
     // ------------------ BASIC STATS ------------------
-    const totalCustomer = await User.countDocuments();
+    const totalCustomer = await User.countDocuments({ role: "customer" });
     const totalRestaurants = await Restaurant.countDocuments();
     const totalPendingRestaurants = await Restaurant.countDocuments({
       verificationStatus: "pending",
