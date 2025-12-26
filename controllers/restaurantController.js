@@ -3,7 +3,7 @@ import Restaurant from "../models/Restaurant.js";
 import { storeImageToCloud } from "../helperFunctions/imageToCloud.js";
 import User from "../models/User.js";
 import Order from "../models/Order.js";
-import moment from "moment";
+import moment from "moment-timezone";
 import {
   calculateRestaurantRevenue,
   calculateRestaurantOrderGrowth,
@@ -158,15 +158,38 @@ export const updateRestaurantDetails = async (req, res) => {
   }
 };
 
+export const getRestaurantDetails = async (req, res) => {
+  try {
+    const { restaurantId } = req.params;
+    const restaurant = await Restaurant.findById(restaurantId);
+    if (!restaurantId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Restaurant ID id required" });
+    }
+    if (restaurant) {
+      return res.status(200).json({ success: true, restaurant });
+    }
+  } catch (error) {
+    console.error("Update Restaurant Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
 export const addMenuItems = async (req, res) => {
   try {
     const { restaurantId } = req.params;
     const { name, price, category } = req.body;
+
     if (!restaurantId) {
       return res
         .status(400)
-        .json({ success: false, message: "Resttaurant Id is not provided" });
+        .json({ success: false, message: "Restaurant Id is not provided" });
     }
+
     if (!name || !price || !category) {
       return res
         .status(400)
@@ -180,38 +203,46 @@ export const addMenuItems = async (req, res) => {
         .json({ success: false, message: "Price must be a number" });
     }
 
-    let imageUrl = await storeImageToCloud(
+    if (!req.files || !req.files.image) {
+      // make sure field name matches frontend input name
+      return res
+        .status(400)
+        .json({ success: false, message: "Logo image is required" });
+    }
+
+    const imageUrl = await storeImageToCloud(
       req.files.image[0],
       "restaurant/menu-items"
     );
+
     const restaurant = await Restaurant.findById(restaurantId);
-    if (restaurant.verificationStatus == "approved") {
-      const menuItem = await MenuItems.create({
-        restaurantId,
-        name,
-        price: priceNumber,
-        image: imageUrl,
-        category,
-      });
-      // push menuItem into restaurant.menu
-      if (!restaurant) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Restaurant not found" });
-      }
+    if (!restaurant) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Restaurant not found" });
+    }
 
-      restaurant.menu.push(menuItem._id);
-      await restaurant.save();
-
-      return res.status(201).json({
-        success: true,
-        menuItem,
-      });
-    } else {
+    if (restaurant.verificationStatus !== "approved") {
       return res
         .status(400)
         .json({ success: false, message: "Restaurant is not approved!" });
     }
+
+    const menuItem = await MenuItems.create({
+      restaurantId,
+      name,
+      price: priceNumber,
+      image: imageUrl,
+      category,
+    });
+
+    restaurant.menu.push(menuItem._id);
+    await restaurant.save();
+
+    return res.status(201).json({
+      success: true,
+      menuItem,
+    });
   } catch (error) {
     console.error("Menu Items Error:", error);
     return res.status(500).json({
@@ -225,7 +256,7 @@ export const addMenuItems = async (req, res) => {
 export const getMenuItems = async (req, res) => {
   try {
     const { restaurantId } = req.params;
-
+    // console.log("menu items ",restaurantId)
     if (!restaurantId) {
       return res
         .status(400)
@@ -240,12 +271,12 @@ export const getMenuItems = async (req, res) => {
     }
 
     const menuItems = await MenuItems.find({ restaurantId });
-
-    if (!menuItems || menuItems.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "No menu items found" });
-    }
+    // console.log("menuitems data ",menuItems)
+    // if (!menuItems || menuItems.length === 0) {
+    //   return res
+    //     .status(404)
+    //     .json({ success: false, message: "No menu items found" });
+    // }
 
     return res.status(200).json({
       success: true,
@@ -265,7 +296,7 @@ export const getMenuItems = async (req, res) => {
 export const updateMenuItem = async (req, res) => {
   try {
     const { restaurantId, menuItemId } = req.params;
-    const { name, price, category } = req.body;
+    const { name, price, category, imageUrl } = req.body;
 
     if (!restaurantId || !menuItemId) {
       return res.status(400).json({
@@ -287,6 +318,7 @@ export const updateMenuItem = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Restaurant not found" });
     }
+
     if (restaurant.ownerId.toString() !== req.user.id) {
       return res.status(403).json({
         success: false,
@@ -294,7 +326,9 @@ export const updateMenuItem = async (req, res) => {
       });
     }
 
+    // Update fields if provided
     if (name) menuItem.name = name;
+
     if (price) {
       const priceNumber = parseFloat(price);
       if (isNaN(priceNumber)) {
@@ -304,16 +338,27 @@ export const updateMenuItem = async (req, res) => {
       }
       menuItem.price = priceNumber;
     }
+
     if (category) menuItem.category = category;
-    menuItem.image = await storeImageToCloud(
-      req.files.image[0],
-      "restaurant/menu-items"
-    );
+
+    // ✅ Handle image upload
+    if (req.files && req.files.image && req.files.image[0]) {
+      // New image uploaded
+      menuItem.image = await storeImageToCloud(
+        req.files.image[0],
+        "restaurant/menu-items"
+      );
+    } else if (imageUrl) {
+      // No new image uploaded, keep existing image or update from frontend
+      menuItem.image = imageUrl;
+    }
+    // else: keep the existing image as-is
 
     await menuItem.save();
 
     return res.status(200).json({
       success: true,
+      message: "Menu item updated successfully",
       menuItem,
     });
   } catch (error) {
@@ -348,7 +393,11 @@ export const deleteMenuItem = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Restaurant not found" });
     }
-    if (restaurant.ownerId.toString() !== req.user.id) {
+    const isOwner = restaurant.ownerId.toString() === req.user.id;
+    const isAdmin = req.user.role === "admin";
+    const isVerificationManager = req.user.role === "verificationManager";
+
+    if (!isOwner && !isAdmin && !isVerificationManager) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to delete this menu item",
@@ -377,17 +426,15 @@ export const deleteMenuItem = async (req, res) => {
 export const getRestaurantDashboardStats = async (req, res) => {
   try {
     const restaurantId = req.params.id;
-    const start = moment().startOf("day").toDate();
-    const end = moment().endOf("day").toDate();
-
+    const tz = "Asia/Karachi";
+    const start = moment().tz(tz).startOf("day").toDate();
+    const end = moment().tz(tz).endOf("day").toDate();
     const orders = await Order.find({
       createdAt: { $gte: start, $lte: end },
     }).populate("orderItems");
-
     let totalRevenue = 0;
     let totalOrders = 0;
     const customerSet = new Set();
-
     const orderStatusCounts = {
       pending: 0,
       confirmed: 0,
@@ -395,10 +442,8 @@ export const getRestaurantDashboardStats = async (req, res) => {
       arriving: 0,
       delivered: 0,
     };
-
     orders.forEach((order) => {
       let hasItemFromRestaurant = false;
-
       order.orderItems.forEach((item) => {
         if (item.restaurantId.toString() === restaurantId) {
           totalRevenue += item.price;
@@ -406,7 +451,6 @@ export const getRestaurantDashboardStats = async (req, res) => {
           hasItemFromRestaurant = true;
         }
       });
-
       if (hasItemFromRestaurant) {
         customerSet.add(order.customerId.toString());
         if (orderStatusCounts.hasOwnProperty(order.status)) {
@@ -414,9 +458,7 @@ export const getRestaurantDashboardStats = async (req, res) => {
         }
       }
     });
-
     totalRevenue = totalRevenue * 0.95;
-
     return res.status(200).json({
       success: true,
       totalRevenue,
@@ -427,11 +469,9 @@ export const getRestaurantDashboardStats = async (req, res) => {
     });
   } catch (error) {
     console.error(error?.message);
-    return res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 };
 
@@ -439,6 +479,7 @@ export const getRestaurantAllOrders = async (req, res) => {
   try {
     const { restaurantId } = req.params;
 
+    // Fetch all orders
     const allOrders = await Order.find()
       .sort({ createdAt: -1 })
       .select("-statusHistory")
@@ -448,36 +489,27 @@ export const getRestaurantAllOrders = async (req, res) => {
       })
       .populate({
         path: "orderItems",
-        populate: [
-          {
-            path: "item",
-            select: "name image category",
-          },
-          {
-            path: "restaurantId",
-            select: "name logo",
-          },
-        ],
+        populate: {
+          path: "item",
+          select: "name image category",
+        },
       });
 
     const restaurantOrders = [];
 
     allOrders.forEach((order) => {
-      // Get only items that belong to this restaurant
+      // Filter only items that belong to this restaurant
       const itemsForRestaurant = order.orderItems.filter(
-        (item) => item.restaurantId._id.toString() === restaurantId
+        (item) => item.restaurantId.toString() === restaurantId
       );
 
-      // Skip orders that do not contain this restaurant's items
       if (itemsForRestaurant.length === 0) return;
 
-      // Calculate TOTAL PRICE for this restaurant only
       const totalPrice = itemsForRestaurant.reduce(
         (sum, item) => sum + item.price,
         0
       );
 
-      // Build clean order object
       restaurantOrders.push({
         _id: order._id,
         customer: order.customerId,
@@ -486,13 +518,14 @@ export const getRestaurantAllOrders = async (req, res) => {
         paymentStatus: order.paymentStatus,
         paymentMethod: order.paymentMethod,
         createdAt: order.createdAt,
-        totalPrice: totalPrice,
+        totalPrice: totalPrice * 0.95,
         orderItems: itemsForRestaurant,
       });
     });
 
     return res.status(200).json({
       success: true,
+      message: "order found",
       orders: restaurantOrders,
     });
   } catch (error) {
@@ -508,25 +541,59 @@ export const updateOrderStatus = async (req, res) => {
   try {
     const { orderId, status } = req.body;
 
-    const targetedOrder = await Order.findById(orderId);
-    if (!targetedOrder) {
-      return res.status(404).json({ message: "Order not found" });
+    if (!orderId || !status) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID and status are required",
+      });
     }
 
-    targetedOrder.status = status;
-    targetedOrder.statusHistory.push({
+    const allowedStatuses = [
+      "pending",
+      "confirmed",
+      "preparing",
+      "arriving",
+      "delivered",
+    ];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order status",
+      });
+    }
+
+    const order = await Order.findById(orderId).populate({
+      path: "orderItems",
+      select: "restaurantId",
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    order.status = status;
+    order.statusHistory.push({
       status,
       time: new Date(),
     });
 
-    await targetedOrder.save();
+    await order.save();
 
-    return res
-      .status(200)
-      .json({ message: "Order status updated", order: targetedOrder });
+    return res.status(200).json({
+      success: true,
+      message: "Order status updated",
+      order,
+    });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Something went wrong" });
+    console.error("Update order status error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+    });
   }
 };
 
@@ -568,13 +635,14 @@ export const getRestaurantAnalytics = async (req, res) => {
     };
 
     let startDate;
+    const tz = "Asia/Karachi";
 
     if (range === "weekly") {
-      startDate = moment().subtract(7, "days").startOf("day");
+      startDate = moment().tz(tz).subtract(7, "days").startOf("day");
     } else if (range === "monthly") {
-      startDate = moment().subtract(1, "month").startOf("day");
+      startDate = moment().tz(tz).subtract(1, "month").startOf("day");
     } else if (range === "yearly") {
-      startDate = moment().subtract(1, "year").startOf("day");
+      startDate = moment().tz(tz).subtract(1, "year").startOf("day");
     }
 
     const orders = await Order.find({
@@ -677,6 +745,9 @@ export const myComplaints = async (req, res) => {
     const complaints = await Complaint.find({
       complaintStatus: "Restaurant",
       raisedBy: restaurantId,
+    }).populate({
+      path: "againstUser",
+      select: "name profilePic _id", // Only fetch these fields
     });
 
     // If no complaints found
@@ -727,14 +798,41 @@ export const getMenuCategories = async (req, res) => {
     items.forEach((i) => {
       categories.push(i.category);
     });
-    if (categories.length > 0) {
-      return res.status(200).json({ success: true, categories: categories });
-    }
+    return res.status(200).json({ success: true, categories: categories });
   } catch (error) {
     return res.status(500).json({
       success: false,
       message: "Server error in getting categories",
       error: error?.message,
+    });
+  }
+};
+
+export const getRestaurantStatus = async (req, res) => {
+  try {
+    const ownerId = req.user.id;
+
+    const restaurant = await Restaurant.findOne({ ownerId });
+
+    if (!restaurant) {
+      return res.status(200).json({
+        success: true,
+        status: "none",
+        message: "No restaurant request found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      status: restaurant.verificationStatus,
+      message: `Restaurant is ${restaurant.verificationStatus}`,
+      restaurantId: restaurant._id,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch restaurant status",
+      error: error.message,
     });
   }
 };

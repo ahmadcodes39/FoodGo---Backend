@@ -31,7 +31,7 @@ const RestaurantsSchema = new mongoose.Schema(
       type: String,
       enum: ["active", "warned", "blocked"],
       default: "active",
-    },
+    }, 
     cuisine: [String],
     description: { type: String, maxlength: 500 },
     openingHours: String,

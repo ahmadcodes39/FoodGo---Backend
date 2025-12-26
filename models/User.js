@@ -31,18 +31,18 @@ const UserSchema = new mongoose.Schema(
         "Phone number must be between 10 and 15 digits",
       ],
     },
-    status: {
+    status: { 
       type: String,
       default: "active",
       enum: ["active", "warned", "blocked"],
     },
     role: {
       type: String,
-      enum: ["customer", "restaurantOwner", "admin", "complaint manager"],
+      enum: ["customer", "restaurantOwner", "admin", "complaintManager","verificationManager"],
       required: true,
     },
     isOnBoarded: {
-      type: Boolean,
+      type: Boolean, 
       default: false,
     },
   },

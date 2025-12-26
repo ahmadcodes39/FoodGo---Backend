@@ -192,7 +192,7 @@ export const getRestaurantFrontInfo = async (req, res) => {
       verificationStatus: "approved",
       operationalStatus: "active",
     })
-      .select("logo deliveryAvailable name cuisine deliveryTime") // same fields as your old function
+      .select("logo deliveryAvailable name cuisine deliveryTime openingHours address") // same fields as your old function
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 });
@@ -219,7 +219,7 @@ export const getRestaurantFrontInfo = async (req, res) => {
 
 export const getRestaurantDetailInfo = async (req, res) => {
   try {
-    const { restaurantId } = req.params.id;
+    const { restaurantId } = req.params;
 
     if (!restaurantId) {
       return res.status(400).json({
@@ -250,7 +250,7 @@ export const getRestaurantDetailInfo = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      info: restaurantInfo,
+      restaurant: restaurantInfo,
       categories: Array.from(categories),
     });
   } catch (error) {
@@ -268,16 +268,22 @@ export const getMyOrders = async (req, res) => {
 
     const orders = await Order.find({ customerId })
       .select(
-        "_id customerId status totalPrice createdAt updatedAt __v orderItems statusHistory"
+        "_id customerId status totalPrice createdAt updatedAt __v orderItems statusHistory deliveryAddress"
       )
       .sort({ createdAt: -1 })
       .populate({
         path: "orderItems",
-        select: "restaurantId -_id",
-        populate: {
-          path: "restaurantId",
-          select: "name logo -_id",
-        },
+        select: "restaurantId item price quantity -_id",
+        populate: [
+          {
+            path: "restaurantId",
+            select: "name logo _id",
+          },
+          {
+            path: "item",
+            select: "name -_id",
+          },
+        ],
       });
 
     // Add deliveredAt field for orders with status 'delivered'
@@ -349,6 +355,28 @@ export const getDetailOrder = async (req, res) => {
   }
 };
 
+export const isAlreadyHaveAComplaint = async (req, res) => {
+  try {
+    const { orderId } = req.query;
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: "Order Id is required" });
+    }
+    const getComplaint = await Complaint.findOne({ orderId });
+
+    if (getComplaint!=null) {
+      return res.status(200).json({ success: true, isAlreadyComplaint: true });
+    }
+
+    // If no complaint exists
+    return res.status(200).json({ success: true, isAlreadyComplaint: false });
+
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
 export const makeAComplaint = async (req, res) => {
   try {
     const { reason, orderId, againstUser, againstRestaurant } = req.body;
@@ -357,11 +385,11 @@ export const makeAComplaint = async (req, res) => {
         success: false,
         message: "Reason and orderId are required",
       });
-    }
+    } 
     const customerId = req.user.id;
 
     const complaint = await Complaint.create({
-      raisedBy: customerId,
+      raisedBy: customerId, 
       orderId,
       reason,
       complaintStatus: "Customer",
@@ -404,16 +432,18 @@ export const getMyComplaints = async (req, res) => {
     });
   }
 };
+
 export const getDetailComplaints = async (req, res) => {
   try {
     const customerId = req.user.id;
-    const { complaintId } = req.params;
+    const { complaintId } = req.query;
+
 
     const myComplaints = await Complaint.find({
       raisedBy: customerId,
       _id: complaintId,
     })
-      .select("-againstUser -responseToCustomer -responseToRestaurant")
+      .select("-againstUser  -responseToRestaurant")
       .populate("againstRestaurant", "name logo")
       .populate(
         "orderId",

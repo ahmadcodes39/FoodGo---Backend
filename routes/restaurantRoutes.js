@@ -16,6 +16,8 @@ import {
   updateOrderStatus,
   myComplaints,
   getMenuCategories,
+  getRestaurantStatus,
+  getRestaurantDetails
 } from "../controllers/restaurantController.js";
 const router = Router();
 
@@ -26,6 +28,9 @@ router.post(
   upload.fields([{ name: "logo" }, { name: "license" }]),
   registerRestaurant
 );
+
+router.get("/:restaurantId/get-detail",auth,getRestaurantDetails)
+
 // update restaurant details
 router.put(
   "/:restaurantId/update-restaurant-details",
@@ -44,7 +49,7 @@ router.post(
 router.get("/:restaurantId/get-menu", auth, getMenuItems);
 // update menu items
 router.put(
-  "/:restaurantId/:menuItemId/add-menu",
+  "/:restaurantId/:menuItemId/update-menu",
   auth,
   upload.fields([{ name: "image" }]),
   updateMenuItem
@@ -60,7 +65,10 @@ router.get("/:restaurantId/orders",auth, getRestaurantAllOrders);
 router.get("/:id/revenue", auth, getRestaurantRevenue);
 router.get("/:id/analytics",auth, getRestaurantAnalytics);
 router.post("/make-complaint",auth, makeAComplaint);
-router.patch("/update-order-status",auth,updateOrderStatus)
+router.post("/update-order-status",auth,updateOrderStatus)
 router.get("/my-complaints",auth,myComplaints)
-router.get("/:id/menu-categories",getMenuCategories)
-export default router;
+router.get("/:id/menu-categories",auth,getMenuCategories)
+router.get("/status", auth, getRestaurantStatus);
+
+export default router; 
+ 

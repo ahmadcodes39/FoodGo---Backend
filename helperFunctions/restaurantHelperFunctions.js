@@ -1,11 +1,12 @@
-import moment from "moment";
+import moment from "moment-timezone";
 import Order from "../models/Order.js";
 
 export const calculateRestaurantRevenue = async (restaurantId, range) => {
+  const tz = 'Asia/Karachi';
   let revenueData = [];
 
   if (range === "weekly") {
-    const startOfWeek = moment().startOf("week");
+    const startOfWeek = moment().tz(tz).startOf("week");
     const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
     for (let i = 0; i < 7; i++) {
@@ -14,7 +15,6 @@ export const calculateRestaurantRevenue = async (restaurantId, range) => {
       const end = day.endOf("day").toDate();
 
       const orders = await Order.find({
-        status: "delivered",
         createdAt: { $gte: start, $lte: end },
       }).populate("orderItems");
 
@@ -36,7 +36,7 @@ export const calculateRestaurantRevenue = async (restaurantId, range) => {
   }
 
   else if (range === "monthly") {
-    const startDate = moment().subtract(30, "days");
+    const startDate = moment().tz(tz).subtract(30, "days");
     const weekLabels = ["Week 1", "Week 2", "Week 3", "Week 4"];
     let weeklyRevenue = [0, 0, 0, 0];
 
@@ -46,7 +46,6 @@ export const calculateRestaurantRevenue = async (restaurantId, range) => {
       const end = day.endOf("day").toDate();
 
       const orders = await Order.find({
-        status: "delivered",
         createdAt: { $gte: start, $lte: end },
       }).populate("orderItems");
 
@@ -73,11 +72,10 @@ export const calculateRestaurantRevenue = async (restaurantId, range) => {
     const monthNames = moment.monthsShort();
 
     for (let m = 0; m < 12; m++) {
-      const start = moment().month(m).startOf("month").toDate();
-      const end = moment().month(m).endOf("month").toDate();
+      const start = moment().tz(tz).month(m).startOf("month").toDate();
+      const end = moment().tz(tz).month(m).endOf("month").toDate();
 
       const orders = await Order.find({
-        status: "delivered",
         createdAt: { $gte: start, $lte: end },
       }).populate("orderItems");
 
@@ -102,11 +100,12 @@ export const calculateRestaurantRevenue = async (restaurantId, range) => {
 };
 
 export const calculateRestaurantOrderGrowth = async (restaurantId, range) => {
+  const tz = 'Asia/Karachi';
   let orderData = [];
 
   // ---------------- WEEKLY ----------------
   if (range === "weekly") {
-    const startOfWeek = moment().startOf("week");
+    const startOfWeek = moment().tz(tz).startOf("week");
     const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
     for (let i = 0; i < 7; i++) {
@@ -142,7 +141,7 @@ export const calculateRestaurantOrderGrowth = async (restaurantId, range) => {
 
   // ---------------- MONTHLY ----------------
   else if (range === "monthly") {
-    const startDate = moment().subtract(30, "days");
+    const startDate = moment().tz(tz).subtract(30, "days");
     const weekLabels = ["Week 1", "Week 2", "Week 3", "Week 4"];
 
     let weeklyOrders = [0, 0, 0, 0];
@@ -183,8 +182,8 @@ export const calculateRestaurantOrderGrowth = async (restaurantId, range) => {
     const monthNames = moment.monthsShort();
 
     for (let m = 0; m < 12; m++) {
-      const start = moment().month(m).startOf("month").toDate();
-      const end = moment().month(m).endOf("month").toDate();
+      const start = moment().tz(tz).month(m).startOf("month").toDate();
+      const end = moment().tz(tz).month(m).endOf("month").toDate();
 
       const orders = await Order.find({
         createdAt: { $gte: start, $lte: end },

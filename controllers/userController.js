@@ -3,7 +3,7 @@ import User from "../models/User.js";
 import { createToken } from "../helperFunctions/createToken.js";
 import bcrypt from "bcryptjs";
 import { storeImageToCloud } from "../helperFunctions/imageToCloud.js";
-
+import Restaurant from "../models/Restaurant.js";
 
 export const SignUp = async (req, res) => {
   try {
@@ -30,8 +30,9 @@ export const SignUp = async (req, res) => {
       role,
     });
 
-  user.isOnBoarded = ["customer", "admin", "complaint manager"].includes(role.toLowerCase());
-
+    user.isOnBoarded = ["customer", "admin", "complaint manager"].includes(
+      role.toLowerCase()
+    );
 
     await user.save();
 
@@ -39,46 +40,58 @@ export const SignUp = async (req, res) => {
     const userWithoutPassword = user.toObject();
     delete userWithoutPassword.password;
 
-    return res
-      .status(201)
-      .json({
-        message: "User registered successfully",
-        user: userWithoutPassword,
-      });
+    return res.status(201).json({
+      success: true,
+      user: userWithoutPassword,
+    });
   } catch (error) {
     console.error("Signup Error:", error);
-    return res.status(500).json({ message: "Internal Server Error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal Server Error" });
   }
 };
 
 export const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email, role });
+
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
+
     const isPasswordMatch = await bcrypt.compare(password, user.password);
+
     if (!isPasswordMatch) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
+
+    const restaurant = await Restaurant.findOne({ ownerId: user._id });
+
     const token = createToken(user);
 
     const { password: _, ...userWithoutPassword } = user._doc;
 
     return res.status(200).json({
-      message: "Login successful",
+      success: true,
       token,
-      user: userWithoutPassword,
+      user: {
+        ...userWithoutPassword,
+        restaurantId: restaurant ? restaurant._id : null,
+      },
     });
   } catch (error) {
     console.error("Signin Error:", error);
-    return res.status(500).json({ message: "Internal Server Error" });
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 };
 
@@ -95,6 +108,7 @@ export const updateProfile = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
+
     let profilePicUrl = null;
     if (req.files?.profilePic) {
       profilePicUrl = await storeImageToCloud(
@@ -102,21 +116,39 @@ export const updateProfile = async (req, res) => {
         "user/profilePics"
       );
     }
+
+    const restaurant = await Restaurant.findOne({ ownerId: user._id });
+
+    // Update fields
     if (name) user.name = name;
     if (email) user.email = email;
     if (phone) user.phone = phone;
-    if (password) user.password = password;
+
+    // Only hash and update if password is provided
+    if (password) {
+      const hashPassword = await bcrypt.hash(password, 10);
+      user.password = hashPassword;
+    }
+
     if (profilePicUrl) user.profilePic = profilePicUrl;
 
     await user.save();
 
+    // Prepare response without password
+    const userObj = user.toObject();
+    delete userObj.password;
+    userObj.restaurantId = restaurant ? restaurant._id : null;
+
     return res.status(200).json({
+      success: true,
       message: "Profile updated successfully",
-      user,
+      user: userObj,
     });
   } catch (error) {
     console.error("Update profile Error:", error);
-    return res.status(500).json({ message: "Internal Server Error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal Server Error" });
   }
 };
 
