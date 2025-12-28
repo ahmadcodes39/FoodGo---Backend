@@ -14,6 +14,7 @@ import {
   getSpecificRestaurantInfo,
   resolveComplaint,
   updateUserStatus,
+  updateRestaurantStatus,
 } from "../controllers/adminController.js";
 import { auth } from "../middleware/authMiddleware.js";
 
@@ -32,6 +33,7 @@ router.get("/:id/restaurant-info", getSpecificRestaurantInfo);
 router.get("/get-complaints",auth,getAllComplaints)
 router.put('/resolve-complaint',auth,resolveComplaint)
 router.put('/update-user-status',auth,updateUserStatus)
+router.put('/update-restaurant-status',auth,updateRestaurantStatus)
 
 // router.get("/complaints",auth,getComplaints);
 

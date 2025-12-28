@@ -29,6 +29,11 @@ router.get("/me", auth, async (req, res) => {
     // Convert to plain object
     const userObj = user.toObject();
     userObj.restaurantId = restaurant ? restaurant._id : null;
+    
+    // Include restaurant operational status for restaurantOwner
+    if (user.role === "restaurantOwner" && restaurant) {
+      userObj.operationalStatus = restaurant.operationalStatus;
+    }
 
     // console.log(userObj); // restaurantId will now appear
     res.status(200).json(userObj);

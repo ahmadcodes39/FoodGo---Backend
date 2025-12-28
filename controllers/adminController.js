@@ -4,6 +4,7 @@ import Order from "../models/Order.js";
 import Restaurant from "../models/Restaurant.js";
 import User from "../models/User.js";
 import moment from "moment";
+import { sendComplaintResolutionEmail } from "../config/email.js";
 
 export const approveRestaurant = async (req, res) => {
   try {
@@ -787,44 +788,120 @@ export const resolveComplaint = async (req, res) => {
       messageToRestaurant,
     } = req.body;
 
-    const complaint = await Complaint.findById(complaintId);
+    const complaint = await Complaint.findById(complaintId)
+      .populate("raisedBy", "name email")
+      .populate("againstUser", "name email")
+      .populate("againstRestaurant", "name")
+      .populate({
+        path: "orderId",
+        select: "totalPrice paymentMethod deliveryAddress",
+      });
+
     if (!complaint) {
       return res.status(404).json({ message: "Complaint not found" });
     }
 
+    // Store old complaint status for email logic
+    const complaint_updated = await Complaint.findById(complaintId);
+
     // 1️⃣ Update complaint info
-    complaint.status = "Resolved";
-    complaint.managerAction = status;
-    complaint.responseToCustomer = messageToCustomer || "";
-    complaint.responseToRestaurant = messageToRestaurant || "";
+    complaint_updated.status = "Resolved";
+    complaint_updated.managerAction = status;
+    complaint_updated.responseToCustomer = messageToCustomer || "";
+    complaint_updated.responseToRestaurant = messageToRestaurant || "";
 
     // 2️⃣ Apply action ONLY if needed
     if (status === "Warned" || status === "Blocked") {
       // Complaint against CUSTOMER
-      if (complaint.againstUser) {
+      if (complaint_updated.againstUser) {
         await User.findByIdAndUpdate(
-          complaint.againstUser,
+          complaint_updated.againstUser,
           { status: status.toLowerCase() }, // warned | blocked
           { new: true }
         );
       }
 
       // Complaint against RESTAURANT
-      if (complaint.againstRestaurant) {
+      if (complaint_updated.againstRestaurant) {
         await Restaurant.findByIdAndUpdate(
-          complaint.againstRestaurant,
+          complaint_updated.againstRestaurant,
           { operationalStatus: status.toLowerCase() },
           { new: true }
         );
       }
     }
 
-    await complaint.save();
+    // 3️⃣ If status is Active, reactivate the account
+    if (status === "Active") {
+      if (complaint_updated.againstUser) {
+        await User.findByIdAndUpdate(
+          complaint_updated.againstUser,
+          { status: "active" },
+          { new: true }
+        );
+      }
+
+      if (complaint_updated.againstRestaurant) {
+        await Restaurant.findByIdAndUpdate(
+          complaint_updated.againstRestaurant,
+          { operationalStatus: "active" },
+          { new: true }
+        );
+      }
+    }
+
+    await complaint_updated.save();
+
+    // 4️⃣ Send email notifications to the party against whom the complaint was filed
+    const orderDetails = {
+      orderId: complaint.orderId?._id || "N/A",
+      totalPrice: complaint.orderId?.totalPrice || 0,
+      paymentMethod: complaint.orderId?.paymentMethod || "N/A",
+      deliveryAddress: complaint.orderId?.deliveryAddress || "N/A",
+    };
+
+    // If complaint is against a customer, send email to customer
+    if (complaint.againstUser) {
+      const customerEmail = complaint.againstUser?.email;
+      const customerName = complaint.againstUser?.name;
+
+      if (customerEmail) {
+        await sendComplaintResolutionEmail({
+          recipientEmail: customerEmail,
+          recipientName: customerName,
+          complaintReason: complaint.reason,
+          orderDetails,
+          managerAction: status,
+          responseMessage: messageToCustomer,
+          isRestaurant: false,
+        });
+      }
+    }
+
+    // If complaint is against a restaurant, send email to restaurant owner
+    if (complaint.againstRestaurant) {
+      const restaurant = await Restaurant.findById(complaint.againstRestaurant).populate("ownerId", "email name");
+      const restaurantOwnerEmail = restaurant?.ownerId?.email;
+      const restaurantOwnerName = restaurant?.ownerId?.name;
+      const restaurantName = complaint.againstRestaurant?.name;
+
+      if (restaurantOwnerEmail) {
+        await sendComplaintResolutionEmail({
+          recipientEmail: restaurantOwnerEmail,
+          recipientName: restaurantOwnerName || restaurantName,
+          complaintReason: complaint.reason,
+          orderDetails,
+          managerAction: status,
+          responseMessage: messageToRestaurant,
+          isRestaurant: true,
+        });
+      }
+    }
 
     return res.status(200).json({
       success: true,
-      message: "Complaint resolved successfully",
-      complaint,
+      message: "Complaint resolved successfully and email notifications sent",
+      complaint: complaint_updated,
     });
   } catch (error) {
     console.error("Resolve complaint error:", error);
@@ -856,5 +933,29 @@ export const updateUserStatus = async (req, res) => {
     res.json({ success: true, user });
   } catch (error) {
     res.status(500).json({ success: false, message: "Failed to update user" });
+  }
+};
+
+export const updateRestaurantStatus = async (req, res) => {
+  try {
+    const { restaurantId, operationalStatus } = req.body;
+
+    if (!["active", "warned", "blocked"].includes(operationalStatus)) {
+      return res.status(400).json({ message: "Invalid operational status" });
+    }
+
+    const restaurant = await Restaurant.findByIdAndUpdate(
+      restaurantId,
+      { operationalStatus },
+      { new: true }
+    );
+
+    if (!restaurant) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    res.json({ success: true, restaurant });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update restaurant status" });
   }
 };

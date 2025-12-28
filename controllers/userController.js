@@ -84,6 +84,7 @@ export const login = async (req, res) => {
       user: {
         ...userWithoutPassword,
         restaurantId: restaurant ? restaurant._id : null,
+        operationalStatus: restaurant ? restaurant.operationalStatus : null,
       },
     });
   } catch (error) {
@@ -138,6 +139,7 @@ export const updateProfile = async (req, res) => {
     const userObj = user.toObject();
     delete userObj.password;
     userObj.restaurantId = restaurant ? restaurant._id : null;
+    userObj.operationalStatus = restaurant ? restaurant.operationalStatus : null;
 
     return res.status(200).json({
       success: true,
